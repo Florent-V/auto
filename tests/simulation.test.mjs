@@ -82,23 +82,30 @@ test('200 seeds : circuit fermé, repère orthonormé, aucun croisement des bord
 })
 
 test('course complète : les 5 IA et le pilote auto terminent, tours comptés exactement', () => {
-  for (const seed of [7, 1234, 31337]) {
+  for (const seed of [7, 42, 1234, 2024, 31337]) {
     const course = nouvelleCourse(seed)
     passerDecompte(course)
     assert.equal(course.etat, ETATS.COURSE)
     let pas = 0, dMax = 0, pasHorsPisteIA = 0, pasIA = 0
+    const lent = course.vehicules.map(() => 0); let lentMax = 0
     const passages = course.vehicules.map(() => 0), tourPrec = course.vehicules.map(() => -1)
     while (!course.vehicules.every(v => v.fini) && pas < 120 * 900) {
       course.pas(DT, AUTO); pas++
       course.vehicules.forEach((v, k) => {
         assert.ok(Number.isFinite(v.x) && Number.isFinite(v.vx), 'état numérique fini')
         dMax = Math.max(dMax, Math.abs(v.d))
+        // Personne ne reste « collé » : durée max passée sous 5 m/s en course.
+        lent[k] = !v.fini && course.tempsCourse > 3 && v.vx < 5 ? lent[k] + DT : 0
+        lentMax = Math.max(lentMax, lent[k])
         if (v.tourMax !== tourPrec[k]) { assert.equal(v.tourMax, tourPrec[k] + 1); tourPrec[k] = v.tourMax; passages[k]++ }
         if (k > 0 && !v.fini) { pasIA++; if (Math.abs(v.d) > DEMI_LARGEUR + 1.1) pasHorsPisteIA++ }
       })
     }
     assert.ok(course.vehicules.every(v => v.fini), `tous à l'arrivée (seed ${seed})`)
     assert.equal(course.etat, ETATS.FIN)
+    assert.ok(lentMax < 2.5, `véhicule bloqué ${lentMax.toFixed(1)} s (seed ${seed})`)
+    const meilleurs = course.vehicules.map(v => v.meilleurTour)
+    assert.ok(Math.max(...meilleurs) < Math.min(...meilleurs) * 1.25, 'meilleurs tours homogènes (pas de véhicule entravé)')
     // Aucun véhicule ne franchit les barrières.
     assert.ok(dMax <= LIMITE_LATERALE + 0.05, `écart latéral max ${dMax}`)
     // Les IA restent sur la piste (tolérance : < 2 % du temps hors piste).

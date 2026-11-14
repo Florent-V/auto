@@ -20,6 +20,14 @@ export class EnregistreurFantome {
     this.curseur = 0 // indice de lecture mémorisé (le temps est monotone)
   }
 
+  /** Oublie tout (changement de circuit). */
+  reinitialiser() {
+    this.nbCourant = 0
+    this.nbMeilleur = 0
+    this.dureeMeilleur = Infinity
+    this.curseur = 0
+  }
+
   /** Démarre l'enregistrement d'un nouveau tour. */
   debuterTour() {
     this.nbCourant = 0

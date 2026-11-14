@@ -1,0 +1,9 @@
+# Lancement : docker compose up --build   →   http://localhost:3000
+services:
+  neon-apex:
+    build: .
+    image: neon-apex:latest
+    container_name: neon-apex
+    ports:
+      - "${PORT:-3000}:3000"
+    restart: unless-stopped

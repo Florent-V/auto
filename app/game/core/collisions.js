@@ -9,7 +9,8 @@
 const RAYON = 1.0          // rayon de chaque cercle
 const DECALAGE = 1.15      // distance centre du véhicule → centre d'un cercle
 const RESTITUTION = 0.35
-const RALENTISSEMENT = 0.975
+const PERTE_PAR_IMPULSION = 0.012 // fraction de vitesse perdue par m/s d'impulsion
+const PERTE_MAX = 0.05            // plafond par contact
 
 /** Résout toutes les collisions ; renvoie l'intensité max subie par le joueur. */
 export function resoudreCollisions(vehicules) {
@@ -52,10 +53,13 @@ export function resoudreCollisions(vehicules) {
         const imp = (-(1 + RESTITUTION) * vRel) / 2
         avx -= imp * nxm; avz -= imp * nzm
         bvx += imp * nxm; bvz += imp * nzm
-        // 3. Léger ralentissement + petit couple de lacet selon le point d'impact.
-        a.vx = (avx * sa + avz * ca) * RALENTISSEMENT
+        // 3. Léger ralentissement PROPORTIONNEL au choc (un simple frottement
+        //    prolongé entre deux voitures ne doit freiner personne), puis petit
+        //    couple de lacet selon le point d'impact.
+        const garde = 1 - Math.min(PERTE_MAX, imp * PERTE_PAR_IMPULSION)
+        a.vx = (avx * sa + avz * ca) * garde
         a.vy = avx * ca - avz * sa
-        b.vx = (bvx * sb + bvz * cb) * RALENTISSEMENT
+        b.vx = (bvx * sb + bvz * cb) * garde
         b.vy = bvx * cb - bvz * sb
         const couple = Math.min(imp, 6) * 0.05
         // Produit vectoriel (bras de levier × normale) → sens du couple.
