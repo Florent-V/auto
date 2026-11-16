@@ -1,128 +1,138 @@
 // =============================================================================
-// MODULE : Modèle 3D des voitures (entièrement procédural)
+// MODULE : Voitures 3D — assemblage des modèles
 // -----------------------------------------------------------------------------
-// Carrosserie extrudée à partir d'un profil latéral, habitacle vitré, aileron,
-// roues qui tournent et braquent, phares / feux émissifs (amplifiés par le
-// bloom) et halo néon sous le châssis. Le modèle regarde vers +Z : la rotation
-// Y du groupe est directement le lacet de la simulation.
-// Géométries et textures sont partagées entre toutes les voitures.
+// Trois modèles entièrement procéduraux : 'f1' (monoplace), 'hypercar' et
+// 'sportive' (voir le dossier voitures/). La géométrie d'un modèle est
+// construite une seule fois puis partagée ; chaque voiture ne possède en propre
+// que ses matériaux de livrée (peinture, accent, feux).
+// Le modèle regarde vers +Z : la rotation Y du groupe est le lacet simulé.
 // =============================================================================
 import * as THREE from 'three'
+import { construireSportive } from './voitures/sportive.js'
+import { construireHypercar } from './voitures/hypercar.js'
+import { construireFormule1 } from './voitures/formule1.js'
 
-let partage = null
+export const MODELES = ['f1', 'hypercar', 'sportive']
+const CONSTRUCTEURS = { f1: construireFormule1, hypercar: construireHypercar, sportive: construireSportive }
+const COULEUR_JANTE = { f1: 0x202228, hypercar: 0x2b2e35, sportive: 0xc9ced6 }
 
-/** Extrude un profil (z, y) sur une largeur donnée, centré sur l'axe X. */
-function extruderProfil(points, largeur, biseau) {
-  const forme = new THREE.Shape()
-  forme.moveTo(points[0][0], points[0][1])
-  for (let i = 1; i < points.length; i++) forme.lineTo(points[i][0], points[i][1])
-  forme.closePath()
-  const g = new THREE.ExtrudeGeometry(forme, {
-    depth: largeur - biseau * 2, bevelEnabled: true, bevelThickness: biseau, bevelSize: biseau, bevelSegments: 2
-  })
-  // x_forme → Z voiture ; profondeur d'extrusion → X voiture.
-  g.rotateY(-Math.PI / 2)
-  g.translate(largeur / 2 - biseau, 0, 0)
-  return g
+const cacheModeles = new Map()
+let communs = null
+
+function modele(type) {
+  if (!cacheModeles.has(type)) cacheModeles.set(type, (CONSTRUCTEURS[type] ?? construireHypercar)())
+  return cacheModeles.get(type)
 }
 
-function ressourcesPartagees() {
-  if (partage) return partage
+/** Matériaux identiques pour toutes les voitures (créés une seule fois). */
+function materiauxCommuns() {
+  if (communs) return communs
   const cv = document.createElement('canvas')
   cv.width = cv.height = 128
   const ctx = cv.getContext('2d')
   const grad = ctx.createRadialGradient(64, 64, 4, 64, 64, 64)
   grad.addColorStop(0, 'rgba(255,255,255,0.9)'); grad.addColorStop(0.5, 'rgba(255,255,255,0.3)'); grad.addColorStop(1, 'rgba(255,255,255,0)')
   ctx.fillStyle = grad; ctx.fillRect(0, 0, 128, 128)
-  const gRoue = new THREE.CylinderGeometry(0.34, 0.34, 0.27, 20)
-  gRoue.rotateZ(Math.PI / 2)
-  const gJante = new THREE.CylinderGeometry(0.2, 0.2, 0.29, 10)
-  gJante.rotateZ(Math.PI / 2)
-  partage = {
-    carrosserie: extruderProfil([
-      [-2.12, 0.24], [-2.16, 0.74], [-1.7, 0.84], [-1.2, 0.86], [0.75, 0.78],
-      [1.75, 0.58], [2.14, 0.44], [2.16, 0.26], [1.6, 0.2], [-1.6, 0.2]
-    ], 1.86, 0.07),
-    habitacle: extruderProfil([[-1.45, 0.82], [-0.95, 1.2], [0.05, 1.22], [0.95, 0.8]], 1.46, 0.05),
-    roue: gRoue, jante: gJante,
-    rayon: new THREE.BoxGeometry(0.3, 0.06, 0.36),
-    aileron: new THREE.BoxGeometry(1.78, 0.05, 0.36),
-    support: new THREE.BoxGeometry(0.06, 0.26, 0.16),
-    phare: new THREE.BoxGeometry(0.42, 0.09, 0.06),
-    feu: new THREE.BoxGeometry(1.62, 0.07, 0.05),
-    halo: new THREE.PlaneGeometry(3.6, 6.2),
-    textureHalo: new THREE.CanvasTexture(cv),
-    matVitre: new THREE.MeshStandardMaterial({ color: 0x05060c, roughness: 0.08, metalness: 0.95 }),
-    matPneu: new THREE.MeshStandardMaterial({ color: 0x0c0c10, roughness: 0.85 }),
-    matJante: new THREE.MeshStandardMaterial({ color: 0xb8bcc8, roughness: 0.3, metalness: 0.9 }),
-    matPhare: new THREE.MeshBasicMaterial({ color: new THREE.Color(3.2, 3.0, 2.4) })
+  communs = {
+    carbone: new THREE.MeshStandardMaterial({ color: 0x15161b, roughness: 0.5, metalness: 0.4 }),
+    noir: new THREE.MeshStandardMaterial({ color: 0x040405, roughness: 0.92 }),
+    vitre: new THREE.MeshStandardMaterial({ color: 0x05070c, roughness: 0.32, metalness: 0.8, envMapIntensity: 1.8 }),
+    chrome: new THREE.MeshStandardMaterial({ color: 0xc9ced8, roughness: 0.3, metalness: 1 }),
+    pneu: new THREE.MeshStandardMaterial({ color: 0x0b0b0e, roughness: 0.86 }),
+    disque: new THREE.MeshStandardMaterial({ color: 0x7c8089, roughness: 0.4, metalness: 0.85 }),
+    plaque: new THREE.MeshStandardMaterial({ color: 0xdfe3ea, roughness: 0.6 }),
+    phare: new THREE.MeshBasicMaterial({ color: new THREE.Color(2.3, 2.2, 1.9) }),
+    feuFixe: new THREE.MeshBasicMaterial({ color: new THREE.Color(1.5, 0.06, 0.1) }),
+    jantes: {},
+    halo: new THREE.PlaneGeometry(1, 1),
+    textureHalo: new THREE.CanvasTexture(cv)
   }
-  return partage
+  for (const [type, couleur] of Object.entries(COULEUR_JANTE)) {
+    communs.jantes[type] = new THREE.MeshStandardMaterial({ color: couleur, roughness: 0.28, metalness: 0.9 })
+  }
+  return communs
 }
 
-const POSITIONS_ROUES = [[0.9, 1.25], [-0.9, 1.25], [0.9, -1.35], [-0.9, -1.35]] // (x, z) AV-G, AV-D, AR-G, AR-D
+// Seules les pièces volumineuses projettent une ombre (moitié moins d'appels de dessin).
+const PORTE_OMBRE = new Set(['peinture', 'accent', 'carbone', 'vitre', 'pneu'])
+const FEU_REPOS = new THREE.Color(1.5, 0.05, 0.1), FEU_STOP = new THREE.Color(7, 0.35, 0.35)
 
 /**
- * @param {number} couleur teinte de la carrosserie
- * @param {boolean} fantome rendu holographique semi-transparent
+ * @param {object} o
+ * @param {'f1'|'hypercar'|'sportive'} o.type
+ * @param {number} o.couleur teinte principale
+ * @param {number} o.accent  teinte secondaire (bandes, étriers, détails)
+ * @param {boolean} o.fantome rendu holographique semi-transparent
  */
-export function creerVoiture3D(couleur, fantome = false) {
-  const r = ressourcesPartagees()
+export function creerVoiture3D({ type = 'hypercar', couleur = 0x18d6ff, accent = 0xffffff, fantome = false } = {}) {
+  const def = modele(type)
+  const c = materiauxCommuns()
   const groupe = new THREE.Group()
   groupe.rotation.order = 'YXZ'
   const caisse = new THREE.Group() // roulis / tangage indépendants des roues
   groupe.add(caisse)
 
-  const matFantome = fantome
-    ? new THREE.MeshBasicMaterial({ color: 0x2aa9c9, transparent: true, opacity: 0.34, depthWrite: false })
-    : null
-  const matCaisse = fantome ? matFantome : new THREE.MeshStandardMaterial({ color: couleur, roughness: 0.28, metalness: 0.65 })
-  const matFeu = fantome ? matFantome : new THREE.MeshBasicMaterial({ color: new THREE.Color(1.6, 0.05, 0.1) })
-  const m = (geo, mat, x = 0, y = 0, z = 0, parent = caisse) => {
-    const mesh = new THREE.Mesh(geo, fantome ? matFantome : mat)
-    mesh.position.set(x, y, z)
-    mesh.castShadow = !fantome
-    parent.add(mesh)
-    return mesh
+  // --- Matériaux propres à cette voiture ------------------------------------
+  const propres = []
+  const creer = (m) => { propres.push(m); return m }
+  const matFantome = fantome ? creer(new THREE.MeshBasicMaterial({ color: 0x2aa9c9, transparent: true, opacity: 0.3, depthWrite: false })) : null
+  const laque = (teinte) => creer(new THREE.MeshPhysicalMaterial({
+    color: teinte, roughness: 0.5, metalness: 0.45, clearcoat: 0.5, clearcoatRoughness: 0.32, envMapIntensity: 1.35
+  }))
+  const matFeu = fantome ? matFantome : creer(new THREE.MeshBasicMaterial({ color: FEU_REPOS.clone() }))
+  const mats = fantome ? null : {
+    ...c, peinture: laque(couleur), accent: laque(accent), casque: laque(accent),
+    etrier: creer(new THREE.MeshStandardMaterial({ color: accent, roughness: 0.45, metalness: 0.3 })),
+    flanc: creer(new THREE.MeshStandardMaterial({ color: accent, roughness: 0.7 })),
+    jante: c.jantes[type], feu: matFeu
   }
-  m(r.carrosserie, matCaisse)
-  m(r.habitacle, r.matVitre)
-  m(r.aileron, matCaisse, 0, 1.1, -1.92)
-  m(r.support, matCaisse, 0.6, 0.97, -1.92)
-  m(r.support, matCaisse, -0.6, 0.97, -1.92)
-  m(r.phare, r.matPhare, 0.62, 0.52, 2.13).castShadow = false
-  m(r.phare, r.matPhare, -0.62, 0.52, 2.13).castShadow = false
-  m(r.feu, matFeu, 0, 0.7, -2.16).castShadow = false
+  const mat = (cle) => (fantome ? matFantome : mats[cle] ?? mats.carbone)
+  const poser = (pieces, parent) => {
+    for (const [cle, geo] of pieces) {
+      const mesh = new THREE.Mesh(geo, mat(cle))
+      mesh.castShadow = !fantome && PORTE_OMBRE.has(cle)
+      parent.add(mesh)
+    }
+  }
+  poser(def.pieces, caisse)
 
-  // Roues : pivot (braquage, axe Y) → roue (rotation, axe X).
+  // --- Roues : pivot (braquage, axe Y) → roue (rotation, axe X) ----------------
+  const { zAv, zAr, xAv, xAr, y } = def.essieux
+  const emplacements = [[xAv, zAv, def.roueAv], [-xAv, zAv, def.roueAv], [xAr, zAr, def.roueAr], [-xAr, zAr, def.roueAr]]
   const roues = [], pivots = []
-  for (let i = 0; i < 4; i++) {
+  for (const [x, z, roueDef] of emplacements) {
     const pivot = new THREE.Group()
-    pivot.position.set(POSITIONS_ROUES[i][0], 0.34, POSITIONS_ROUES[i][1])
+    pivot.position.set(x, y, z)
     const roue = new THREE.Group()
-    m(r.roue, r.matPneu, 0, 0, 0, roue)
-    m(r.jante, r.matJante, 0, 0, 0, roue)
-    m(r.rayon, r.matPneu, 0, 0, 0, roue)
-    pivot.add(roue)
+    // Les roues droites sont retournées : face extérieure vers −X.
+    const sens = new THREE.Group(), sensFixe = new THREE.Group()
+    if (x < 0) { sens.rotation.y = Math.PI; sensFixe.rotation.y = Math.PI }
+    poser(roueDef.tournant, sens)
+    poser(roueDef.fixe, sensFixe)
+    roue.add(sens)
+    pivot.add(roue, sensFixe)
     groupe.add(pivot)
     roues.push(roue); pivots.push(pivot)
   }
 
-  // Halo néon au sol, de la couleur de la voiture.
+  // --- Halo néon au sol, de la couleur de la voiture ---------------------------
   if (!fantome) {
-    const halo = new THREE.Mesh(r.halo, new THREE.MeshBasicMaterial({
-      map: r.textureHalo, color: new THREE.Color(couleur).multiplyScalar(0.9), transparent: true,
+    const halo = new THREE.Mesh(c.halo, creer(new THREE.MeshBasicMaterial({
+      map: c.textureHalo, color: new THREE.Color(couleur).multiplyScalar(0.9), transparent: true,
       blending: THREE.AdditiveBlending, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4
-    }))
+    })))
     halo.rotation.x = -Math.PI / 2
+    halo.scale.set(def.halo.largeur, def.halo.longueur, 1)
     halo.position.y = 0.05
     halo.renderOrder = 2
     groupe.add(halo)
   }
 
-  const FEU_REPOS = new THREE.Color(1.6, 0.05, 0.1), FEU_STOP = new THREE.Color(6, 0.3, 0.3)
   return {
-    groupe, caisse,
+    groupe, caisse, type,
+    /** Position des roues arrière (fumée, traces) et des phares. */
+    arriere: { x: xAr, z: zAr },
+    phares: def.phares,
     /** Met à jour roues, feux stop et attitude de caisse. Aucune allocation. */
     animer(angleRoue, braquage, freinage, roulis, tangage) {
       for (let i = 0; i < 4; i++) roues[i].rotation.x = angleRoue
@@ -131,6 +141,11 @@ export function creerVoiture3D(couleur, fantome = false) {
       if (!fantome) matFeu.color.copy(freinage ? FEU_STOP : FEU_REPOS)
       caisse.rotation.z = roulis
       caisse.rotation.x = tangage
+    },
+    /** Libère les matériaux propres (la géométrie, partagée, est conservée). */
+    liberer() {
+      groupe.removeFromParent()
+      for (const m of propres) m.dispose()
     }
   }
 }

@@ -14,7 +14,7 @@ const toast = useToast()
 const canvas = ref(null)
 const canvasCarte = ref(null)
 const hud = reactive(creerEtatHud())
-const options = reactive({ tours: 3, difficulte: 'normal', musique: true })
+const options = reactive({ tours: 3, difficulte: 'normal', musique: true, modele: 'hypercar' })
 const erreur = ref('')
 let moteur = null
 
@@ -48,12 +48,16 @@ async function copierLien() {
 }
 
 watch(() => options.musique, (v) => moteur && moteur.audio.definirMusique(v))
+// Changer de modèle remplace immédiatement la voiture présentée derrière le menu.
+watch(() => options.modele, (v) => moteur && moteur.definirModeleJoueur(v))
 
 onMounted(() => {
   calculerEchelle()
   window.addEventListener('resize', calculerEchelle)
   try {
     moteur = new Moteur({ canvas: canvas.value, canvasCarte: canvasCarte.value, hud })
+    if (['f1', 'hypercar', 'sportive'].includes(route.query.voiture)) options.modele = route.query.voiture
+    moteur.options.modele = options.modele
     hud.autopilote = route.query.autopilot === '1'
     chargerSeed(route.query.seed ?? seedAleatoire())
     window.__neonApex = moteur // accès console / tests automatisés
@@ -110,6 +114,7 @@ onBeforeUnmount(() => {
         v-model:tours="options.tours"
         v-model:difficulte="options.difficulte"
         v-model:musique="options.musique"
+        v-model:modele="options.modele"
         v-model:autopilote="hud.autopilote"
         :seed="hud.seed"
         :longueur="hud.longueur"

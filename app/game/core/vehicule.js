@@ -68,6 +68,8 @@ export function braquageMax(vitesse) {
 export function creerVehicule(id, nom, couleur, estJoueur) {
   return {
     id, nom, couleur, estJoueur,
+    // --- Apparence (sans effet sur la physique) ---
+    accent: 0xffffff, modele: 'hypercar',
     // --- État physique ---
     x: 0, y: 0, z: 0, lacet: 0,
     vx: 0, vy: 0, r: 0, braquage: 0, angleRoues: 0,

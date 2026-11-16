@@ -13,7 +13,21 @@ docker compose up --build
 
 Puis ouvrir <http://localhost:3000>. Un circuit précis : `http://localhost:3000/?seed=1234`
 (la seed peut aussi être un mot : `?seed=monaco`). Mode démonstration :
-`?seed=1234&autopilot=1`.
+`?seed=1234&autopilot=1`. Voiture présélectionnée : `?voiture=f1`, `hypercar` ou `sportive`.
+
+## Voitures
+
+Trois modèles, choisis dans le menu (l'aperçu 3D change en direct) et mélangés
+sur la grille. Le modèle est purement visuel : la physique est la même pour tous.
+
+| Modèle | Silhouette |
+| --- | --- |
+| **Monoplace** | Type Formule 1 : roues découvertes, aileron avant à trois plans, halo, pontons, aileron arrière à volet, suspensions apparentes |
+| **Hypercar** | Moteur central : nez plongeant, bulle vitrée avancée, capot à persiennes, aileron sur cols de cygne, bandeau de feux, diffuseur |
+| **Sportive** | Coupé GT : long capot, pavillon fastback, becquet intégré, doubles bandes, quatre feux ronds |
+
+Aucun fichier 3D : les carrosseries sont modelées par le code, à partir de
+sections interpolées puis lissées (`app/game/rendu/voitures/`).
 
 Sans Docker (Node ≥ 22) :
 
@@ -60,7 +74,8 @@ app/
       collisions.js    contacts entre véhicules (impulsions)
       fantome.js       enregistrement / relecture interpolée du meilleur tour
       course.js        machine à états, tours, chrono, classement
-    rendu/           Three.js : scène, décor, voitures, effets, caméra, mini-carte
+    rendu/           Three.js : scène, décor, effets, caméra, mini-carte
+      voitures/        outils de carrosserie, roues et les trois modèles
     audio.js         son entièrement synthétisé (Web Audio)
     entrees.js       clavier
     moteur.js        boucle de jeu à pas fixe, liaison simulation ↔ rendu ↔ HUD

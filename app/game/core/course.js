@@ -39,14 +39,17 @@ const TRANSITIONS = {
 export const DUREE_DECOMPTE = 3.2
 export const NB_IA = 5
 const DIFFICULTES = { facile: 0.9, normal: 0.955, difficile: 1.01 }
+/** Adversaires : nom, livrée (couleur + accent) et modèle de voiture. */
 const PILOTES = [
-  { nom: 'Véga', couleur: 0xff3d6e },
-  { nom: 'Orion', couleur: 0xffb020 },
-  { nom: 'Lyra', couleur: 0x9b5cff },
-  { nom: 'Nova', couleur: 0x35e06f },
-  { nom: 'Altaïr', couleur: 0xf5f5f5 }
+  { nom: 'Véga', couleur: 0xe8112d, accent: 0xffffff, modele: 'f1' },
+  { nom: 'Orion', couleur: 0xff9d0a, accent: 0x15161b, modele: 'hypercar' },
+  { nom: 'Lyra', couleur: 0x7c3aed, accent: 0xf2f2f2, modele: 'sportive' },
+  { nom: 'Nova', couleur: 0x22c55e, accent: 0xfde047, modele: 'f1' },
+  { nom: 'Altaïr', couleur: 0xeef0f4, accent: 0xe11d48, modele: 'hypercar' }
 ]
 export const COULEUR_JOUEUR = 0x18d6ff
+export const ACCENT_JOUEUR = 0xff2a8a
+export const MODELES = ['f1', 'hypercar', 'sportive']
 
 export class Course {
   /**
@@ -55,8 +58,9 @@ export class Course {
    * @param {number} options.tours        nombre de tours à boucler
    * @param {string} options.difficulte   'facile' | 'normal' | 'difficile'
    * @param {object} options.enregistreur EnregistreurFantome (conservé d'une course à l'autre)
+   * @param {string} options.modeleJoueur 'f1' | 'hypercar' | 'sportive' (apparence uniquement)
    */
-  constructor({ circuit, tours = 3, difficulte = 'normal', enregistreur }) {
+  constructor({ circuit, tours = 3, difficulte = 'normal', enregistreur, modeleJoueur = 'hypercar' }) {
     this.circuit = circuit
     this.tours = tours
     this.difficulte = difficulte
@@ -69,9 +73,14 @@ export class Course {
 
     // --- Véhicules : indice 0 = joueur, 1..5 = IA ---------------------------
     this.joueur = creerVehicule(0, 'Vous', COULEUR_JOUEUR, true)
+    this.joueur.accent = ACCENT_JOUEUR
+    this.joueur.modele = MODELES.includes(modeleJoueur) ? modeleJoueur : 'hypercar'
     this.vehicules = [this.joueur]
     for (let i = 0; i < NB_IA; i++) {
-      this.vehicules.push(creerVehicule(i + 1, PILOTES[i].nom, PILOTES[i].couleur, false))
+      const v = creerVehicule(i + 1, PILOTES[i].nom, PILOTES[i].couleur, false)
+      v.accent = PILOTES[i].accent
+      v.modele = PILOTES[i].modele
+      this.vehicules.push(v)
     }
     /** Classement : indices de véhicules triés du premier au dernier. */
     this.ordre = new Int8Array(this.vehicules.length)

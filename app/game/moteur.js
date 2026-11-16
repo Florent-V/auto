@@ -64,7 +64,7 @@ export class Moteur {
     this.audio = creerAudio()
     this.entrees = creerEntrees((action) => this.surAction(action))
     this.enregistreur = new EnregistreurFantome()
-    this.options = { tours: 3, difficulte: 'normal' }
+    this.options = { tours: 3, difficulte: 'normal', modele: 'hypercar' }
     this.course = null
     this.decor = null
     this.minimap = null
@@ -73,9 +73,7 @@ export class Moteur {
     this.fumee = creerFumee(this.rendu.scene)
     this.traces = creerTraces(this.rendu.scene, 12)
     this.voitures = []
-    this.voitureFantome = creerVoiture3D(0x6ff3ff, true)
-    this.voitureFantome.groupe.visible = false
-    this.rendu.scene.add(this.voitureFantome.groupe)
+    this.voitureFantome = null
     // Phares du joueur : un seul projecteur dynamique.
     this.phares = new THREE.SpotLight(0xfff1d6, 260, 85, 0.5, 0.7, 1.6)
     this.phares.position.set(0, 0.9, 1.6)
@@ -89,6 +87,7 @@ export class Moteur {
     this.roulis = new Float32Array(6)
     this.tangage = new Float32Array(6)
     this.secousse = 0
+    this.cadrage = 0; this.cadrageARefaire = false
     this.vuTour = 0; this.vuRecord = 0; this.decomptePrec = -1
     this.etatPrec = ''
     // Mesure de performance / résolution dynamique.
@@ -130,19 +129,45 @@ export class Moteur {
   creerCourse() {
     this.course = new Course({
       circuit: this.circuit, tours: this.options.tours,
-      difficulte: this.options.difficulte, enregistreur: this.enregistreur
+      difficulte: this.options.difficulte, enregistreur: this.enregistreur,
+      modeleJoueur: this.options.modele
     })
-    // Voitures 3D : créées à la première course, réutilisées ensuite.
-    if (this.voitures.length === 0) {
-      for (const v of this.course.vehicules) {
-        const modele = creerVoiture3D(v.couleur)
-        this.rendu.scene.add(modele.groupe)
-        this.voitures.push(modele)
-      }
-      this.voitures[0].groupe.add(this.phares, this.phares.target)
-    }
+    this.equiperVoitures()
     this.vuTour = 0; this.vuRecord = 0; this.decomptePrec = -1
     this.reinitialiserVisuels()
+  }
+
+  /**
+   * Associe un modèle 3D à chaque véhicule. Les modèles sont conservés d'une
+   * course à l'autre ; seul un changement de type (choix du joueur) en recrée un.
+   */
+  equiperVoitures() {
+    const vehicules = this.course.vehicules
+    for (let k = 0; k < vehicules.length; k++) {
+      const v = vehicules[k]
+      if (this.voitures[k] && this.voitures[k].type === v.modele) continue
+      if (this.voitures[k]) this.voitures[k].liberer()
+      const m = creerVoiture3D({ type: v.modele, couleur: v.couleur, accent: v.accent })
+      this.rendu.scene.add(m.groupe)
+      this.voitures[k] = m
+      if (k === 0) {
+        // Phares et fantôme suivent le modèle du joueur.
+        this.phares.position.set(0, m.phares.y + 0.3, m.phares.z - 0.4)
+        m.groupe.add(this.phares, this.phares.target)
+        if (this.voitureFantome) this.voitureFantome.liberer()
+        this.voitureFantome = creerVoiture3D({ type: v.modele, fantome: true })
+        this.voitureFantome.groupe.visible = false
+        this.rendu.scene.add(this.voitureFantome.groupe)
+      }
+    }
+  }
+
+  /** Choix du modèle du joueur depuis le menu : la voiture change à l'écran. */
+  definirModeleJoueur(type) {
+    this.options.modele = type
+    if (!this.course) return
+    this.course.joueur.modele = type
+    this.equiperVoitures()
   }
 
   reinitialiserVisuels() {
@@ -189,6 +214,7 @@ export class Moteur {
     this.ratioMax = Math.min(window.devicePixelRatio || 1, 2)
     if (this.ratio > this.ratioMax) this.ratio = this.ratioMax
     this.rendu.redimensionner(l, h, this.ratio)
+    this.cadrageARefaire = true
     // Redimensionner efface le canvas : on redessine aussitôt (pas d'image noire).
     if (this.course) this.rendu.rendre(this.temps, 0, 0)
   }
@@ -273,9 +299,9 @@ export class Moteur {
       const vAbs = Math.abs(v.vx)
       const glisse = Math.max(v.glisse, v.cmdFam && vAbs > 5 ? 0.9 : 0)
       const poussiere = v.horsPiste > 0.5 && vAbs > 6
-      const ax = x - sinL * 1.35, az = z - cosL * 1.35
+      const ax = x + sinL * m.arriere.z, az = z + cosL * m.arriere.z
       for (let cote = -1; cote <= 1; cote += 2) {
-        const rx = ax + cosL * 0.9 * cote, rz = az - sinL * 0.9 * cote
+        const rx = ax + cosL * m.arriere.x * cote, rz = az - sinL * m.arriere.x * cote
         this.traces.poser(k * 2 + (cote > 0 ? 0 : 1), rx, y + 0.03, rz, cosL, -sinL, glisse > 0.3 ? glisse * (poussiere ? 0.5 : 1) : 0)
         if ((glisse > 0.35 || poussiere) && ((this.image + k) & 1) === 0) {
           const gris = poussiere ? 0 : 0.78
@@ -302,8 +328,8 @@ export class Moteur {
     const etat = course.etat
     if (etat === ETATS.PAUSE) return
     const j = course.joueur
-    // Sujet filmé : le joueur, sauf au menu où l'on suit une voiture de la démo.
-    const sujet = etat === ETATS.MENU ? course.vehicules[3] : j
+    // Sujet filmé : toujours la voiture du joueur (pilotée par l'IA au menu).
+    const sujet = j
     const x = sujet.xPrec + (sujet.x - sujet.xPrec) * alpha
     const y = sujet.yPrec + (sujet.y - sujet.yPrec) * alpha
     const z = sujet.zPrec + (sujet.z - sujet.zPrec) * alpha
@@ -318,11 +344,27 @@ export class Moteur {
       this.camera.definirAngle(lacet + Math.PI + doux * 2.4)
       this.camera.orbiter(dt, x, y + 0.6, z, 6.4 + doux * 3, 2.0 + doux * 1.2, 0)
     } else if (etat === ETATS.MENU) {
-      this.camera.orbiter(dt, x, y, z, 13, 4.5, 0.25)
+      this.camera.orbiter(dt, x, y, z, 8.5, 2.6, 0.3)
     } else {
       this.camera.orbiter(dt, x, y, z, 9.5, 3.2, 0.35)
     }
     this.rendu.suivre(x, y, z)
+    this.cadrer(etat === ETATS.MENU && window.innerWidth > 760 ? 0.22 : 0, dt)
+  }
+
+  /**
+   * Cadrage : au menu, la voiture présentée est décalée vers la droite de
+   * l'écran (le panneau occupe la gauche). Transition douce vers le centre.
+   */
+  cadrer(cible, dt) {
+    const avant = this.cadrage
+    this.cadrage += (cible - this.cadrage) * Math.min(1, 4 * dt)
+    if (Math.abs(this.cadrage - cible) < 0.002) this.cadrage = cible
+    if (this.cadrage === avant && !this.cadrageARefaire) return
+    this.cadrageARefaire = false
+    const cam = this.rendu.camera, l = window.innerWidth, h = window.innerHeight
+    if (this.cadrage > 0) cam.setViewOffset(l, h, -this.cadrage * l, 0, l, h)
+    else cam.clearViewOffset()
   }
 
   /** Feux du portique + bips du décompte + sons d'impact. */

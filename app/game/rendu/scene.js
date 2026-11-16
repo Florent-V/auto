@@ -121,8 +121,8 @@ export function creerScene(canvas) {
   pmrem.dispose()
 
   // --- Lumières ---------------------------------------------------------------
-  scene.add(new THREE.HemisphereLight(0x9a7cff, 0x24122e, 1.1))
-  const soleil = new THREE.DirectionalLight(0xffa573, 2.6)
+  scene.add(new THREE.HemisphereLight(0x9a7cff, 0x24122e, 1.3))
+  const soleil = new THREE.DirectionalLight(0xffa573, 2.0)
   soleil.castShadow = true
   soleil.shadow.mapSize.set(2048, 2048)
   const oc = soleil.shadow.camera
@@ -135,7 +135,7 @@ export function creerScene(canvas) {
   const cible = new THREE.WebGLRenderTarget(4, 4, { type: THREE.HalfFloatType, samples: 4 })
   const composer = new EffectComposer(renderer, cible)
   composer.addPass(new RenderPass(scene, camera))
-  const bloom = new UnrealBloomPass(new THREE.Vector2(4, 4), 0.62, 0.7, 0.92)
+  const bloom = new UnrealBloomPass(new THREE.Vector2(4, 4), 0.6, 0.7, 1.2)
   composer.addPass(bloom)
   const finale = new ShaderPass(PASSE_FINALE)
   composer.addPass(finale)

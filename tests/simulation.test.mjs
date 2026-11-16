@@ -6,7 +6,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { genererCircuit, DEMI_LARGEUR, LIMITE_LATERALE } from '../app/game/core/circuit.js'
-import { Course, ETATS } from '../app/game/core/course.js'
+import { Course, ETATS, MODELES } from '../app/game/core/course.js'
 import { EnregistreurFantome } from '../app/game/core/fantome.js'
 import { normaliserSeed } from '../app/game/core/rng.js'
 
@@ -250,4 +250,23 @@ test('machine à états : seules les transitions prévues sont acceptées', () =
   assert.equal(course.etat, ETATS.COURSE)
   assert.equal(course.retourMenu(), true)
   assert.equal(course.etat, ETATS.MENU)
+})
+
+test('modèles de voitures : grille mixte, choix du joueur respecté, aucun effet sur la physique', () => {
+  const circuit = genererCircuit(77)
+  const courses = MODELES.map(m => new Course({ circuit, tours: 1, enregistreur: new EnregistreurFantome(), modeleJoueur: m }))
+  courses.forEach((c, i) => {
+    assert.equal(c.joueur.modele, MODELES[i])
+    // Les trois types sont représentés parmi les adversaires.
+    assert.deepEqual([...new Set(c.vehicules.slice(1).map(v => v.modele))].sort(), [...MODELES].sort())
+    assert.ok(c.vehicules.every(v => Number.isInteger(v.couleur) && Number.isInteger(v.accent)))
+    c.demarrer()
+  })
+  assert.equal(new Course({ circuit, enregistreur: new EnregistreurFantome(), modeleJoueur: 'tracteur' }).joueur.modele, 'hypercar')
+  // Le modèle est purement visuel : les trois courses évoluent à l'identique.
+  for (let i = 0; i < 120 * 20; i++) for (const c of courses) c.pas(DT, AUTO)
+  for (let k = 0; k < 6; k++) {
+    assert.equal(courses[0].vehicules[k].x, courses[1].vehicules[k].x)
+    assert.equal(courses[0].vehicules[k].progression, courses[2].vehicules[k].progression)
+  }
 })

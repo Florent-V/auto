@@ -7,10 +7,16 @@ const tours = defineModel('tours', { type: Number })
 const difficulte = defineModel('difficulte', { type: String })
 const musique = defineModel('musique', { type: Boolean })
 const autopilote = defineModel('autopilote', { type: Boolean })
+const modele = defineModel('modele', { type: String })
 
 const saisie = ref(props.seed)
 watch(() => props.seed, (v) => { saisie.value = v })
 
+const choixModeles = [
+  { valeur: 'f1', libelle: 'Monoplace', detail: 'Roues découvertes, ailerons, halo', icone: 'i-lucide-rocket' },
+  { valeur: 'hypercar', libelle: 'Hypercar', detail: 'Moteur central, aileron, diffuseur', icone: 'i-lucide-zap' },
+  { valeur: 'sportive', libelle: 'Sportive', detail: 'Coupé GT, long capot, bandes', icone: 'i-lucide-car-front' }
+]
 const choixTours = [1, 3, 5, 8]
 const choixDifficulte = [
   { valeur: 'facile', libelle: 'Facile' },
@@ -41,6 +47,26 @@ const choixDifficulte = [
             <UButton size="xl" color="neutral" variant="subtle" icon="i-lucide-dices" aria-label="Circuit aléatoire" @click="emit('aleatoire')" />
             <UButton size="xl" color="neutral" variant="subtle" icon="i-lucide-link" aria-label="Copier le lien du circuit" @click="emit('copier')" />
           </form>
+        </div>
+
+        <!-- Modèle de voiture : l'aperçu 3D derrière le menu change en direct -->
+        <div>
+          <div class="mb-1.5 text-xs uppercase tracking-[0.25em] text-slate-400">Votre voiture</div>
+          <div class="grid grid-cols-3 gap-2">
+            <button
+              v-for="m in choixModeles" :key="m.valeur" type="button"
+              class="rounded-xl border px-3 py-2.5 text-left transition"
+              :class="modele === m.valeur
+                ? 'border-cyan-300/80 bg-cyan-400/15 shadow-[0_0_18px_rgba(24,214,255,0.25)]'
+                : 'border-white/10 bg-white/5 hover:border-white/30'"
+              :aria-pressed="modele === m.valeur"
+              @click="modele = m.valeur"
+            >
+              <UIcon :name="m.icone" class="size-5" :class="modele === m.valeur ? 'text-cyan-200' : 'text-slate-400'" />
+              <div class="font-display text-sm font-bold tracking-wide" :class="modele === m.valeur ? 'text-white' : 'text-slate-200'">{{ m.libelle }}</div>
+              <div class="hidden text-xs leading-tight text-slate-400 sm:block">{{ m.detail }}</div>
+            </button>
+          </div>
         </div>
 
         <div class="grid gap-5 sm:grid-cols-2">
