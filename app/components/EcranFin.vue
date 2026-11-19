@@ -15,7 +15,7 @@ const MEDAILLES = ['text-amber-300', 'text-slate-300', 'text-orange-400']
     <div class="panneau m-auto w-[min(94vw,40rem)] p-6 sm:p-8" :style="{ zoom: echelle }">
       <div class="flex items-end justify-between gap-4">
         <div>
-          <div class="text-sm uppercase tracking-[0.4em] text-cyan-200/80">Circuit #{{ hud.seed }}</div>
+          <div class="text-sm uppercase tracking-[0.4em] text-cyan-200/80">{{ hud.circuit.nom }}</div>
           <h2 class="titre-neon text-5xl sm:text-6xl">{{ titre }}</h2>
         </div>
         <div class="text-right">
@@ -52,7 +52,7 @@ const MEDAILLES = ['text-amber-300', 'text-slate-300', 'text-orange-400']
 
       <div class="mt-6 grid gap-3 sm:grid-cols-2">
         <UButton size="xl" block icon="i-lucide-rotate-ccw" label="Rejouer ce circuit" @click="emit('rejouer')" />
-        <UButton size="xl" block color="secondary" variant="subtle" icon="i-lucide-dices" label="Nouveau circuit" @click="emit('nouveau')" />
+        <UButton size="xl" block color="secondary" variant="subtle" icon="i-lucide-dices" label="Changer de circuit" @click="emit('nouveau')" />
         <UButton size="lg" block color="neutral" variant="subtle" icon="i-lucide-link" label="Copier le lien" @click="emit('copier')" />
         <UButton size="lg" block color="neutral" variant="ghost" icon="i-lucide-house" label="Menu" @click="emit('menu')" />
       </div>

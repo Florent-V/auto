@@ -6,7 +6,9 @@ const props = defineProps({ hud: { type: Object, required: true } })
 
 // Arc du compteur : 270° sur un cercle de rayon 84.
 const LONGUEUR_ARC = 2 * Math.PI * 84 * 0.75
-const arcVitesse = computed(() => LONGUEUR_ARC * Math.min(1, props.hud.vitesse / 300))
+const arcVitesse = computed(() => LONGUEUR_ARC * Math.min(1, props.hud.vitesse / 360))
+const NOMS_CAMERAS = { poursuite: 'Poursuite', proche: 'Poursuite proche', capot: 'Capot', embarquee: 'Embarquée' }
+const echelleG = 9 // pixels par g (≈ 5 g en bord de cercle)
 const arcRegime = computed(() => 2 * Math.PI * 70 * 0.75 * props.hud.regime)
 
 // Bandeau « record » : visible quelques secondes après chaque meilleur tour.
@@ -95,11 +97,58 @@ onBeforeUnmount(() => clearTimeout(minuterie))
     </div>
 
     <!-- Indicateurs -->
-    <div class="absolute bottom-4 left-1/2 flex -translate-x-1/2 items-center gap-2">
-      <UBadge v-if="hud.fantome" color="primary" variant="subtle" icon="i-lucide-ghost" label="Fantôme actif" />
-      <UBadge v-if="hud.autopilote" color="secondary" variant="subtle" icon="i-lucide-bot" label="Pilote automatique" />
+    <div class="absolute bottom-4 left-1/2 flex -translate-x-1/2 flex-wrap items-center justify-center gap-2">
+      <UBadge v-if="hud.fantome" color="primary" variant="subtle" icon="i-lucide-ghost" label="Fantôme" />
+      <UBadge v-if="hud.autopilote" color="secondary" variant="subtle" icon="i-lucide-bot" label="Pilote auto" />
+      <UBadge color="neutral" variant="subtle" icon="i-lucide-video" :label="NOMS_CAMERAS[hud.camera]" />
+      <UBadge v-if="hud.manette" color="neutral" variant="subtle" icon="i-lucide-gamepad-2" label="Manette" />
       <UBadge v-if="hud.muet" color="neutral" variant="subtle" icon="i-lucide-volume-x" label="Muet" />
       <UBadge color="neutral" variant="subtle" :label="`${hud.ips} i/s`" class="chiffres" />
+    </div>
+
+    <!-- Télémétrie (touche T) -->
+    <Transition name="fondu">
+      <div v-if="hud.telemetrie" class="panneau absolute bottom-4 right-64 w-64 p-3 text-xs">
+        <div class="mb-2 flex items-center justify-between">
+          <span class="uppercase tracking-[0.25em] text-slate-400">Télémétrie</span>
+          <span class="text-slate-400">{{ hud.tele.surfaces }}</span>
+        </div>
+        <div class="flex gap-3">
+          <!-- Diagramme g-g : accélérations latérale et longitudinale. -->
+          <svg viewBox="-50 -50 100 100" class="size-24 shrink-0">
+            <circle r="48" fill="rgba(255,255,255,0.03)" stroke="rgba(255,255,255,0.15)" />
+            <circle r="24" fill="none" stroke="rgba(255,255,255,0.1)" />
+            <line x1="-48" x2="48" stroke="rgba(255,255,255,0.1)" /><line y1="-48" y2="48" stroke="rgba(255,255,255,0.1)" />
+            <circle :cx="Math.max(-46, Math.min(46, -hud.tele.gLat * echelleG))" :cy="Math.max(-46, Math.min(46, -hud.tele.gLong * echelleG))" r="4.5" fill="#18d6ff" />
+            <text x="-46" y="46" fill="rgba(255,255,255,0.4)" font-size="8">{{ (48 / echelleG).toFixed(0) }} g</text>
+          </svg>
+          <dl class="flex-1 space-y-0.5">
+            <div class="flex justify-between"><dt class="text-slate-400">Latéral</dt><dd class="chiffres">{{ Math.abs(hud.tele.gLat).toFixed(2) }} g</dd></div>
+            <div class="flex justify-between"><dt class="text-slate-400">Longit.</dt><dd class="chiffres">{{ hud.tele.gLong.toFixed(2) }} g</dd></div>
+            <div class="flex justify-between"><dt class="text-slate-400">Appui</dt><dd class="chiffres">{{ hud.tele.appuiKg }} kg</dd></div>
+            <div class="flex justify-between"><dt class="text-slate-400">Charge AV</dt><dd class="chiffres">{{ hud.tele.repartAv }} %</dd></div>
+            <div class="flex justify-between"><dt class="text-slate-400">Régime</dt><dd class="chiffres">{{ hud.regimeTr }}</dd></div>
+          </dl>
+        </div>
+        <div class="mt-2 space-y-1">
+          <div v-for="[nom, val] in [['Adhérence AV', hud.tele.usageAv], ['Adhérence AR', hud.tele.usageAr]]" :key="nom">
+            <div class="flex justify-between text-slate-400"><span>{{ nom }}</span><span class="chiffres">{{ val }} %</span></div>
+            <div class="h-1.5 overflow-hidden rounded bg-white/10">
+              <div class="h-full rounded" :style="{ width: Math.min(100, val) + '%', background: val > 97 ? '#ff4d6d' : val > 85 ? '#f5b82e' : '#35e06f' }" />
+            </div>
+          </div>
+        </div>
+        <div class="mt-2 flex gap-1">
+          <span v-for="t in [['ABS', hud.tele.abs], ['TC', hud.tele.tc], ['BLOCAGE', hud.tele.blocage], ['PATINAGE', hud.tele.patinage]]" :key="t[0]"
+            class="rounded px-1.5 py-0.5 font-bold" :class="t[1] ? 'bg-amber-400 text-black' : 'bg-white/5 text-slate-500'">{{ t[0] }}</span>
+        </div>
+      </div>
+    </Transition>
+
+    <!-- Compte-tours : témoins de passage façon F1, régime -->
+    <div class="absolute bottom-[15.5rem] right-4 flex w-56 justify-center gap-1">
+      <span v-for="k in 10" :key="k" class="size-3 rounded-full transition-colors duration-75"
+        :class="hud.rupteur ? 'animate-pulse bg-blue-400' : k <= hud.feuxShift ? (k <= 4 ? 'bg-emerald-400' : k <= 7 ? 'bg-red-500' : 'bg-violet-400') : 'bg-white/10'" />
     </div>
 
     <!-- Compteur de vitesse -->
@@ -110,17 +159,18 @@ onBeforeUnmount(() => clearTimeout(minuterie))
             <stop offset="0" stop-color="#18d6ff" /><stop offset="1" stop-color="#ff2a8a" />
           </linearGradient>
         </defs>
-        <circle cx="100" cy="100" r="92" fill="rgba(10,8,24,0.62)" stroke="rgba(24,214,255,0.2)" />
+        <circle cx="100" cy="100" r="92" fill="rgba(8,9,14,0.66)" stroke="rgba(255,255,255,0.12)" />
         <circle cx="100" cy="100" r="84" fill="none" stroke="rgba(255,255,255,0.09)" stroke-width="9" stroke-linecap="round" :stroke-dasharray="`${LONGUEUR_ARC} 1000`" />
-        <circle cx="100" cy="100" r="84" fill="none" stroke="url(#degrade-vitesse)" stroke-width="9" stroke-linecap="round" :stroke-dasharray="`${arcVitesse} 1000`" style="filter: drop-shadow(0 0 6px #18d6ff)" />
-        <circle cx="100" cy="100" r="70" fill="none" :stroke="hud.regime > 0.9 ? '#ff4d6d' : 'rgba(255,255,255,0.55)'" stroke-width="2.5" :stroke-dasharray="`${arcRegime} 1000`" />
+        <circle cx="100" cy="100" r="84" fill="none" stroke="url(#degrade-vitesse)" stroke-width="9" stroke-linecap="round" :stroke-dasharray="`${arcVitesse} 1000`" />
+        <circle cx="100" cy="100" r="70" fill="none" :stroke="hud.regime > 0.95 ? '#ff4d6d' : 'rgba(255,255,255,0.6)'" stroke-width="3" :stroke-dasharray="`${arcRegime} 1000`" />
       </svg>
       <div class="absolute inset-0 flex flex-col items-center justify-center">
         <div class="chiffres text-6xl font-black leading-none">{{ hud.vitesse }}</div>
         <div class="text-xs uppercase tracking-[0.35em] text-slate-400">km/h</div>
-        <div class="chiffres mt-1 rounded-md bg-white/10 px-2.5 text-lg font-bold text-cyan-200">
-          {{ hud.rapport === 0 ? 'R' : hud.rapport }}
+        <div class="chiffres mt-1 rounded-md px-2.5 text-2xl font-black" :class="hud.rupteur ? 'bg-red-500 text-white' : 'bg-white/10 text-cyan-200'">
+          {{ hud.rapport < 0 ? 'R' : hud.rapport }}
         </div>
+        <div class="chiffres mt-0.5 text-[11px] text-slate-400">{{ hud.regimeTr }} tr/min{{ hud.boiteAuto ? '' : ' · M' }}</div>
       </div>
     </div>
   </div>

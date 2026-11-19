@@ -1,66 +1,86 @@
 // =============================================================================
-// MODULE : Scène 3D — moteur de rendu, ciel, lumières, post-traitement
+// MODULE : Scène 3D — moteur de rendu, ciel, ambiances, post-traitement
 // -----------------------------------------------------------------------------
-// Ambiance « crépuscule néon » : ciel en dégradé calculé par shader, soleil
-// rayé à l'horizon, étoiles, brouillard, bloom sur tout ce qui est émissif
-// (phares, feux, barrières lumineuses) et une passe finale vignettage +
-// aberration chromatique proportionnelle à la vitesse.
+// Trois ambiances :
+//  - jour       : ciel physique (diffusion de Rayleigh / Mie, modèle de
+//                 Preetham) avec nuages, soleil haut, ombres franches ;
+//  - crepuscule : soleil rasant, lumière orangée, longues ombres ;
+//  - nuit       : ciel étoilé et lune, éclairage par les mâts d'éclairage du
+//                 circuit (voir decor.js), phares des voitures.
+// L'environnement (reflets des carrosseries) est recalculé à partir du ciel à
+// chaque changement d'ambiance (PMREM). Post-traitement : bloom (lumières),
+// vignettage léger, tonemapping ACES.
 // =============================================================================
 import * as THREE from 'three'
+import { Sky } from 'three/addons/objects/Sky.js'
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js'
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js'
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js'
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js'
 
-/** Direction du soleil visible dans le ciel (bas sur l'horizon). */
-export const DIRECTION_SOLEIL = new THREE.Vector3(-0.55, 0.11, -0.83).normalize()
-/** Direction de l'éclairage (un peu plus haute pour des ombres lisibles). */
-const DIRECTION_LUMIERE = new THREE.Vector3(-0.55, 0.42, -0.83).normalize()
-const COULEUR_BRUME = 0x3a1a4e
+/** Réglages de chaque ambiance (couleurs en sRGB). */
+export const AMBIANCES = {
+  jour: {
+    soleil: { elevation: 48, azimut: 145, couleur: 0xfff1dc, intensite: 2.6 },
+    ciel: { turbidity: 2.4, rayleigh: 1.1, mieCoefficient: 0.004, mieDirectionalG: 0.8, cloudCoverage: 0.32 },
+    hemi: { ciel: 0xb4c8e6, sol: 0x4a5236, intensite: 0.55 },
+    brouillard: { couleur: 0xa9bdd4, densite: 0.00026 },
+    exposition: 0.5, bloom: 0, seuilBloom: 8, environnement: 0.28, nuit: 0
+  },
+  crepuscule: {
+    soleil: { elevation: 4.5, azimut: 250, couleur: 0xffa463, intensite: 2.4 },
+    ciel: { turbidity: 5.5, rayleigh: 2.6, mieCoefficient: 0.006, mieDirectionalG: 0.86, cloudCoverage: 0.42 },
+    hemi: { ciel: 0x9a8cc4, sol: 0x3a2e28, intensite: 0.75 },
+    brouillard: { couleur: 0xc79a86, densite: 0.00045 },
+    exposition: 0.56, bloom: 0.18, seuilBloom: 6, environnement: 0.4, nuit: 0.35
+  },
+  nuit: {
+    soleil: { elevation: 38, azimut: 210, couleur: 0x9fb6ff, intensite: 0.32 }, // clair de lune
+    ciel: null,
+    hemi: { ciel: 0x2a3a5c, sol: 0x0b0d10, intensite: 0.38 },
+    brouillard: { couleur: 0x0d121d, densite: 0.0009 },
+    exposition: 0.9, bloom: 0.45, seuilBloom: 1.5, environnement: 0.3, nuit: 1
+  }
+}
 
-// --- Shader du ciel ----------------------------------------------------------
-const CIEL_VERTEX = /* glsl */ `
+// --- Ciel de nuit : dégradé, étoiles, lune, halo urbain à l'horizon ----------
+const NUIT_VERTEX = /* glsl */ `
   varying vec3 vDir;
   void main() {
     vDir = normalize(position);
     vec4 p = modelViewMatrix * vec4(position, 1.0);
     gl_Position = projectionMatrix * p;
-    gl_Position.z = gl_Position.w; // toujours au fond de la scène
+    gl_Position.z = gl_Position.w;
   }`
-const CIEL_FRAGMENT = /* glsl */ `
-  uniform vec3 uSoleil;
+const NUIT_FRAGMENT = /* glsl */ `
+  uniform vec3 uLune;
   uniform float uTemps;
   varying vec3 vDir;
   float hash(vec3 p) { p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
   void main() {
     vec3 d = normalize(vDir);
     float h = d.y;
-    // Dégradé vertical : horizon orangé → magenta → indigo profond.
-    vec3 horizon = vec3(1.0, 0.42, 0.22);
-    vec3 milieu = vec3(0.62, 0.12, 0.48);
-    vec3 zenith = vec3(0.035, 0.03, 0.14);
-    vec3 col = mix(horizon, milieu, smoothstep(-0.02, 0.16, h));
-    col = mix(col, zenith, smoothstep(0.1, 0.62, h));
-    // Sous l'horizon : brume sombre (raccord avec le brouillard de la scène).
-    col = mix(col, vec3(0.23, 0.10, 0.31), smoothstep(0.0, -0.08, h));
-    // Halo et disque solaire avec bandes horizontales façon « synthwave ».
-    float cosA = dot(d, normalize(uSoleil));
-    col += vec3(1.0, 0.45, 0.25) * pow(max(cosA, 0.0), 14.0) * 0.55;
-    float disque = smoothstep(0.9871, 0.9884, cosA);
-    float bandes = smoothstep(0.35, 0.5, abs(fract((d.y - uSoleil.y) * 34.0 - 0.15) - 0.5) * 2.0);
-    float masque = mix(1.0, bandes, smoothstep(0.035, -0.06, d.y - uSoleil.y));
-    vec3 solaire = mix(vec3(1.9, 0.4, 0.55), vec3(2.3, 1.6, 0.6), smoothstep(-0.1, 0.12, d.y - uSoleil.y));
-    col = mix(col, solaire, disque * masque * step(0.0, h));
-    // Étoiles scintillantes en altitude.
-    vec3 g = floor(d * 190.0);
-    float e = step(0.9972, hash(g));
-    float scint = 0.6 + 0.4 * sin(uTemps * 2.0 + hash(g + 3.0) * 40.0);
-    col += vec3(0.9, 0.95, 1.4) * e * scint * smoothstep(0.12, 0.5, h) * 1.6;
+    vec3 col = mix(vec3(0.045, 0.06, 0.1), vec3(0.006, 0.01, 0.025), smoothstep(0.0, 0.55, h));
+    // Halo des villes voisines à l'horizon.
+    col += vec3(0.12, 0.08, 0.05) * pow(1.0 - abs(h), 14.0) * 0.6;
+    col = mix(col, vec3(0.02, 0.025, 0.035), smoothstep(0.0, -0.1, h));
+    // Étoiles (densité et éclat variables) + Voie lactée discrète.
+    vec3 g = floor(d * 260.0);
+    float e = step(0.9968, hash(g));
+    float eclat = hash(g + 7.0);
+    float scint = 0.75 + 0.25 * sin(uTemps * 3.0 + hash(g + 3.0) * 40.0);
+    col += vec3(0.85, 0.9, 1.0) * e * eclat * scint * smoothstep(0.02, 0.3, h) * 1.4;
+    float voie = exp(-pow(dot(d, normalize(vec3(0.3, 0.5, -0.8))) * 3.2, 2.0));
+    col += vec3(0.05, 0.055, 0.07) * voie * smoothstep(0.05, 0.4, h);
+    // Lune : disque + halo.
+    float c = dot(d, normalize(uLune));
+    col += vec3(0.5, 0.55, 0.65) * pow(max(c, 0.0), 220.0) * 0.4;
+    col = mix(col, vec3(1.6, 1.6, 1.5), smoothstep(0.99955, 0.9997, c));
     gl_FragColor = vec4(col, 1.0);
   }`
 
-// --- Passe finale : vignettage + aberration chromatique liée à la vitesse ----
+// --- Passe finale : vignettage + légère aberration (vitesse, chocs) ----------
 const PASSE_FINALE = {
   uniforms: { tDiffuse: { value: null }, uVitesse: { value: 0 }, uChoc: { value: 0 } },
   vertexShader: /* glsl */ `
@@ -74,16 +94,17 @@ const PASSE_FINALE = {
     void main() {
       vec2 c = vUv - 0.5;
       float r2 = dot(c, c);
-      vec2 dec = c * r2 * (0.012 + 0.05 * uVitesse + 0.08 * uChoc);
+      vec2 dec = c * r2 * (0.004 + 0.012 * uVitesse + 0.05 * uChoc);
       vec3 col;
       col.r = texture2D(tDiffuse, vUv + dec).r;
       col.g = texture2D(tDiffuse, vUv).g;
       col.b = texture2D(tDiffuse, vUv - dec).b;
-      col *= 1.0 - r2 * (0.75 + 0.5 * uVitesse);
-      col += vec3(0.5, 0.05, 0.1) * uChoc * r2;
+      col *= 1.0 - r2 * (0.42 + 0.25 * uVitesse);
       gl_FragColor = vec4(col, 1.0);
     }`
 }
+
+const _dir = new THREE.Vector3()
 
 /**
  * Crée le moteur de rendu complet.
@@ -94,60 +115,116 @@ export function creerScene(canvas) {
   renderer.shadowMap.enabled = true
   renderer.shadowMap.type = THREE.PCFShadowMap
   renderer.toneMapping = THREE.ACESFilmicToneMapping
-  renderer.toneMappingExposure = 1.05
 
   const scene = new THREE.Scene()
-  scene.fog = new THREE.FogExp2(COULEUR_BRUME, 0.0021)
-  const camera = new THREE.PerspectiveCamera(62, 1, 0.3, 6000)
+  scene.fog = new THREE.FogExp2(0xbccbdc, 0.0003)
+  const camera = new THREE.PerspectiveCamera(60, 1, 0.3, 9000)
 
-  // --- Ciel -----------------------------------------------------------------
-  const matCiel = new THREE.ShaderMaterial({
-    uniforms: { uSoleil: { value: DIRECTION_SOLEIL }, uTemps: { value: 0 } },
-    vertexShader: CIEL_VERTEX, fragmentShader: CIEL_FRAGMENT,
+  // --- Ciels ------------------------------------------------------------------
+  const ciel = new Sky()
+  ciel.scale.setScalar(8000)
+  ciel.frustumCulled = false
+  const matNuit = new THREE.ShaderMaterial({
+    uniforms: { uLune: { value: new THREE.Vector3(0, 1, 0) }, uTemps: { value: 0 } },
+    vertexShader: NUIT_VERTEX, fragmentShader: NUIT_FRAGMENT,
     side: THREE.BackSide, depthWrite: false, fog: false
   })
-  const ciel = new THREE.Mesh(new THREE.SphereGeometry(100, 32, 16), matCiel)
-  ciel.frustumCulled = false
-  ciel.renderOrder = -10
-  scene.add(ciel)
-
-  // Carte d'environnement dérivée du ciel : reflets sur les carrosseries.
-  const pmrem = new THREE.PMREMGenerator(renderer)
-  const sceneCiel = new THREE.Scene()
-  sceneCiel.add(new THREE.Mesh(ciel.geometry, matCiel))
-  const cibleEnv = pmrem.fromScene(sceneCiel, 0.02)
-  scene.environment = cibleEnv.texture
-  scene.environmentIntensity = 0.55
-  pmrem.dispose()
+  const cielNuit = new THREE.Mesh(new THREE.SphereGeometry(100, 32, 16), matNuit)
+  cielNuit.frustumCulled = false
+  cielNuit.renderOrder = -10
+  scene.add(ciel, cielNuit)
 
   // --- Lumières ---------------------------------------------------------------
-  scene.add(new THREE.HemisphereLight(0x9a7cff, 0x24122e, 1.3))
-  const soleil = new THREE.DirectionalLight(0xffa573, 2.0)
+  const hemi = new THREE.HemisphereLight(0xc4dcff, 0x55603f, 1)
+  const soleil = new THREE.DirectionalLight(0xffffff, 3)
   soleil.castShadow = true
   soleil.shadow.mapSize.set(2048, 2048)
   const oc = soleil.shadow.camera
-  oc.left = -55; oc.right = 55; oc.top = 55; oc.bottom = -55; oc.near = 1; oc.far = 320
-  soleil.shadow.bias = -0.0006
-  soleil.shadow.normalBias = 0.04
-  scene.add(soleil, soleil.target)
+  oc.left = -70; oc.right = 70; oc.top = 70; oc.bottom = -70; oc.near = 1; oc.far = 500
+  soleil.shadow.bias = -0.0004
+  soleil.shadow.normalBias = 0.05
+  scene.add(hemi, soleil, soleil.target)
 
   // --- Post-traitement --------------------------------------------------------
   const cible = new THREE.WebGLRenderTarget(4, 4, { type: THREE.HalfFloatType, samples: 4 })
   const composer = new EffectComposer(renderer, cible)
   composer.addPass(new RenderPass(scene, camera))
-  const bloom = new UnrealBloomPass(new THREE.Vector2(4, 4), 0.6, 0.7, 1.2)
+  const bloom = new UnrealBloomPass(new THREE.Vector2(4, 4), 0.2, 0.6, 1.2)
   composer.addPass(bloom)
   const finale = new ShaderPass(PASSE_FINALE)
   composer.addPass(finale)
   composer.addPass(new OutputPass())
 
-  let largeur = 1, hauteur = 1, ratio = 1
+  // --- Environnement (reflets) recalculé par ambiance ---------------------------
+  const pmrem = new THREE.PMREMGenerator(renderer)
+  let cibleEnv = null
+  function recalculerEnvironnement(nuit) {
+    const sceneEnv = new THREE.Scene()
+    if (nuit) sceneEnv.add(new THREE.Mesh(cielNuit.geometry, matNuit))
+    else {
+      const copie = new Sky()
+      copie.scale.setScalar(80)
+      copie.material.uniforms = THREE.UniformsUtils.clone(ciel.material.uniforms)
+      copie.material.uniforms.cloudCoverage.value = 0 // pas de nuages dans les reflets (bruit)
+      sceneEnv.add(copie)
+      // Sol neutre sous l'horizon : reflets réalistes du bas de caisse.
+      const sol = new THREE.Mesh(new THREE.CircleGeometry(60, 24), new THREE.MeshBasicMaterial({ color: 0x3d4434 }))
+      sol.rotation.x = -Math.PI / 2; sol.position.y = -2
+      sceneEnv.add(sol)
+    }
+    const nouvelle = pmrem.fromScene(sceneEnv, 0.03)
+    if (cibleEnv) cibleEnv.dispose()
+    cibleEnv = nouvelle
+    scene.environment = cibleEnv.texture
+    sceneEnv.traverse((o) => { if (o.material && o !== cielNuit && o.material !== matNuit) o.material.dispose() })
+  }
 
-  return {
-    renderer, scene, camera, soleil, finale,
+  let ambianceCourante = null
+  const directionLumiere = new THREE.Vector3(0, 1, 0)
+
+  const rendu = {
+    renderer, scene, camera, soleil, hemi, finale,
+    get ambiance() { return ambianceCourante },
+    get facteurNuit() { return AMBIANCES[ambianceCourante]?.nuit ?? 0 },
+
+    /** Applique une ambiance : ciel, lumières, brouillard, exposition, bloom. */
+    appliquerAmbiance(nom) {
+      const a = AMBIANCES[nom] ?? AMBIANCES.jour
+      ambianceCourante = AMBIANCES[nom] ? nom : 'jour'
+      const elev = THREE.MathUtils.degToRad(a.soleil.elevation)
+      const azim = THREE.MathUtils.degToRad(a.soleil.azimut)
+      _dir.set(Math.cos(elev) * Math.sin(azim), Math.sin(elev), Math.cos(elev) * Math.cos(azim))
+      directionLumiere.copy(_dir)
+      const nuit = !a.ciel
+      ciel.visible = !nuit
+      cielNuit.visible = nuit
+      if (nuit) matNuit.uniforms.uLune.value.copy(_dir)
+      else {
+        const u = ciel.material.uniforms
+        for (const [cle, valeur] of Object.entries(a.ciel)) u[cle].value = valeur
+        u.sunPosition.value.copy(_dir)
+      }
+      soleil.color.set(a.soleil.couleur)
+      soleil.intensity = a.soleil.intensite
+      soleil.shadow.intensity = nuit ? 0.5 : 1
+      hemi.color.set(a.hemi.ciel)
+      hemi.groundColor.set(a.hemi.sol)
+      hemi.intensity = a.hemi.intensite
+      scene.fog.color.set(a.brouillard.couleur)
+      scene.fog.density = a.brouillard.densite
+      renderer.toneMappingExposure = a.exposition
+      // Le ciel physique est très lumineux (HDR) : sans seuil élevé, le bloom
+      // l'étalerait sur toute l'image. De jour, il est donc coupé.
+      bloom.enabled = a.bloom > 0
+      bloom.strength = a.bloom
+      bloom.threshold = a.seuilBloom
+      scene.environmentIntensity = a.environnement
+      recalculerEnvironnement(nuit)
+      return a
+    },
+
     /** Adapte le rendu à la taille de la fenêtre et au pixel ratio demandé. */
     redimensionner(l, h, pixelRatio) {
-      largeur = l; hauteur = h; ratio = pixelRatio
       renderer.setPixelRatio(pixelRatio)
       renderer.setSize(l, h, false)
       composer.setPixelRatio(pixelRatio)
@@ -155,23 +232,32 @@ export function creerScene(canvas) {
       camera.aspect = l / h
       camera.updateProjectionMatrix()
     },
-    get pixelRatio() { return ratio },
+
     /** L'ombre portée suit le point d'intérêt (frustum d'ombre réduit = net). */
     suivre(x, y, z) {
       soleil.target.position.set(x, y, z)
-      soleil.position.set(x + DIRECTION_LUMIERE.x * 150, y + DIRECTION_LUMIERE.y * 150, z + DIRECTION_LUMIERE.z * 150)
+      soleil.position.set(x + directionLumiere.x * 250, y + directionLumiere.y * 250, z + directionLumiere.z * 250)
     },
+
     rendre(temps, vitesseNorm, choc) {
+      cielNuit.position.copy(camera.position)
       ciel.position.copy(camera.position)
-      matCiel.uniforms.uTemps.value = temps
+      matNuit.uniforms.uTemps.value = temps
+      ciel.material.uniforms.time.value = temps
       finale.uniforms.uVitesse.value = vitesseNorm
       finale.uniforms.uChoc.value = choc
       composer.render()
     },
+
     liberer() {
-      composer.dispose(); cible.dispose(); cibleEnv.dispose()
-      ciel.geometry.dispose(); matCiel.dispose()
+      composer.dispose(); cible.dispose()
+      if (cibleEnv) cibleEnv.dispose()
+      pmrem.dispose()
+      ciel.geometry.dispose(); ciel.material.dispose()
+      cielNuit.geometry.dispose(); matNuit.dispose()
       renderer.dispose()
     }
   }
+  rendu.appliquerAmbiance('jour')
+  return rendu
 }

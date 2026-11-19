@@ -47,6 +47,14 @@ function materiauxCommuns() {
     halo: new THREE.PlaneGeometry(1, 1),
     textureHalo: new THREE.CanvasTexture(cv)
   }
+  communs.matOmbre = new THREE.MeshBasicMaterial({
+    map: communs.textureHalo, color: 0x000000, transparent: true, opacity: 0.72, depthWrite: false,
+    polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4
+  })
+  communs.matPhareSol = new THREE.MeshBasicMaterial({
+    map: communs.textureHalo, color: new THREE.Color(0.22, 0.21, 0.18), transparent: true, blending: THREE.AdditiveBlending,
+    depthWrite: false, polygonOffset: true, polygonOffsetFactor: -5, polygonOffsetUnits: -5
+  })
   for (const [type, couleur] of Object.entries(COULEUR_JANTE)) {
     communs.jantes[type] = new THREE.MeshStandardMaterial({ color: couleur, roughness: 0.28, metalness: 0.9 })
   }
@@ -115,17 +123,25 @@ export function creerVoiture3D({ type = 'hypercar', couleur = 0x18d6ff, accent =
     roues.push(roue); pivots.push(pivot)
   }
 
-  // --- Halo néon au sol, de la couleur de la voiture ---------------------------
+  // --- Ombre de contact (occlusion ambiante sous la caisse) ---------------------
+  // Assombrit le sol juste sous la voiture : elle « pose » sur la piste même
+  // hors de la zone couverte par l'ombre portée du soleil.
+  let lumierePhares = null
   if (!fantome) {
-    const halo = new THREE.Mesh(c.halo, creer(new THREE.MeshBasicMaterial({
-      map: c.textureHalo, color: new THREE.Color(couleur).multiplyScalar(0.9), transparent: true,
-      blending: THREE.AdditiveBlending, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4
-    })))
-    halo.rotation.x = -Math.PI / 2
-    halo.scale.set(def.halo.largeur, def.halo.longueur, 1)
-    halo.position.y = 0.05
-    halo.renderOrder = 2
-    groupe.add(halo)
+    const ombre = new THREE.Mesh(c.halo, c.matOmbre)
+    ombre.rotation.x = -Math.PI / 2
+    ombre.scale.set(def.halo.largeur * 0.62, def.halo.longueur * 0.78, 1)
+    ombre.position.y = 0.03
+    ombre.renderOrder = 2
+    groupe.add(ombre)
+    // Tache de lumière des phares sur la piste (visible la nuit seulement).
+    lumierePhares = new THREE.Mesh(c.halo, c.matPhareSol)
+    lumierePhares.rotation.x = -Math.PI / 2
+    lumierePhares.scale.set(7, 16, 1)
+    lumierePhares.position.set(0, 0.04, def.phares.z + 8.5)
+    lumierePhares.renderOrder = 3
+    lumierePhares.visible = false
+    groupe.add(lumierePhares)
   }
 
   return {
@@ -142,6 +158,8 @@ export function creerVoiture3D({ type = 'hypercar', couleur = 0x18d6ff, accent =
       caisse.rotation.z = roulis
       caisse.rotation.x = tangage
     },
+    /** Nuit : allume la tache de lumière des phares. */
+    definirNuit(nuit) { if (lumierePhares) lumierePhares.visible = nuit },
     /** Libère les matériaux propres (la géométrie, partagée, est conservée). */
     liberer() {
       groupe.removeFromParent()

@@ -17,7 +17,7 @@ export function creerAudio() {
   let oscs = [], gainMoteur, filtreMoteur
   let gainCrissement, gainVent, gainHerbe
   let gainMusique, musiqueActive = true, prochainPas = 0, indexPas = 0
-  let tamponBruit = null
+  let tamponBruit = null, rapportPrec = 1
 
   function bruit(duree) {
     const src = ctx.createBufferSource()
@@ -125,19 +125,37 @@ export function creerAudio() {
      * Mise à jour continue (appelée une fois par image).
      * @param {number} regime 0..1, charge 0..1, vitesse m/s, glisse 0..1, horsPiste 0..1
      */
-    mettreAJour(regime, charge, vitesse, glisse, horsPiste, enJeu) {
+    /**
+     * Mise à jour continue (une fois par image) à partir du véhicule écouté.
+     * Moteur : la fréquence d'allumage vaut régime/60 × cylindres/2 (moteur
+     * 4 temps) ; on joue le demi-ordre, l'ordre principal et un harmonique, le
+     * filtre s'ouvre avec la charge. Vibreurs : grondement basse fréquence.
+     */
+    mettreAJour(v, enJeu) {
       if (!ctx || ctx.state !== 'running') return
       const t = ctx.currentTime
-      const f = 48 + regime * 150
-      oscs[0].frequency.setTargetAtTime(f, t, 0.03)
-      oscs[1].frequency.setTargetAtTime(f * 0.5, t, 0.03)
-      oscs[2].frequency.setTargetAtTime(f * 1.503, t, 0.03)
-      filtreMoteur.frequency.setTargetAtTime(350 + regime * 1900 + charge * 900, t, 0.05)
-      gainMoteur.gain.setTargetAtTime(enJeu ? 0.07 + charge * 0.08 + regime * 0.03 : 0, t, 0.08)
-      const v = Math.min(1, Math.abs(vitesse) / 70)
-      gainCrissement.gain.setTargetAtTime(enJeu ? glisse * (1 - horsPiste) * 0.16 : 0, t, 0.05)
-      gainVent.gain.setTargetAtTime(enJeu ? v * v * 0.22 : 0, t, 0.1)
-      gainHerbe.gain.setTargetAtTime(enJeu ? horsPiste * Math.min(1, Math.abs(vitesse) / 20) * 0.7 : 0, t, 0.06)
+      const mo = v.spec.moteur
+      const allumage = (Math.max(v.regime, mo.ralenti) / 60) * (mo.cylindres / 2)
+      const charge = v.passage > 0 ? 0 : v.cmdGaz
+      const regime = Math.min(1, v.regime / mo.regimeMax)
+      oscs[0].frequency.setTargetAtTime(allumage * 0.5, t, 0.02)
+      oscs[1].frequency.setTargetAtTime(allumage, t, 0.02)
+      oscs[2].frequency.setTargetAtTime(allumage * 1.5, t, 0.02)
+      filtreMoteur.frequency.setTargetAtTime(300 + regime * 2600 + charge * 1400, t, 0.04)
+      gainMoteur.gain.setTargetAtTime(enJeu ? 0.05 + charge * 0.09 + regime * 0.04 : 0, t, 0.05)
+      const vit = Math.min(1, Math.abs(v.vx) / 80)
+      gainCrissement.gain.setTargetAtTime(enJeu ? v.glisse * (1 - v.horsPiste) * 0.16 : 0, t, 0.05)
+      gainVent.gain.setTargetAtTime(enJeu ? vit * vit * 0.22 : 0, t, 0.1)
+      const surface = Math.max(v.horsPiste * Math.min(1, Math.abs(v.vx) / 20) * 0.7, v.vibration * 0.55)
+      gainHerbe.gain.setTargetAtTime(enJeu ? surface : 0, t, 0.04)
+      // Passage de rapport : petite détonation à l'échappement.
+      if (enJeu && v.rapport !== rapportPrec && v.rapport > 1 && v.rapport > rapportPrec) {
+        const src = bruit(0.08), f = ctx.createBiquadFilter(), g = ctx.createGain()
+        f.type = 'bandpass'; f.frequency.value = 180 + regime * 200; f.Q.value = 1.2
+        g.gain.setValueAtTime(0.35, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.09)
+        src.connect(f).connect(g).connect(maitre); src.start(t); src.stop(t + 0.1)
+      }
+      rapportPrec = v.rapport
       rythmer()
     },
     bip(freq, duree) {

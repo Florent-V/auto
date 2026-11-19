@@ -17,9 +17,9 @@
 // le maximum déjà atteint : un tour ne peut donc être validé qu'UNE fois et
 // uniquement dans le sens de la course (reculer fait décroître la progression).
 // =============================================================================
-import { DEMI_LARGEUR, normaliserAngle } from './circuit.js'
+import { normaliserAngle } from './circuit.js'
 import { creerRng } from './rng.js'
-import { creerVehicule, placerSurCircuit, pasVehicule } from './vehicule.js'
+import { creerVehicule, definirModele, placerSurCircuit, pasVehicule } from './vehicule.js'
 import { piloterIA } from './ia.js'
 import { resoudreCollisions } from './collisions.js'
 
@@ -38,8 +38,9 @@ const TRANSITIONS = {
 
 export const DUREE_DECOMPTE = 3.2
 export const NB_IA = 5
-const DIFFICULTES = { facile: 0.9, normal: 0.955, difficile: 1.01 }
-/** Adversaires : nom, livrée (couleur + accent) et modèle de voiture. */
+/** Niveau des IA : fraction du profil de vitesse limite qu'elles exploitent. */
+const DIFFICULTES = { facile: 0.93, normal: 0.97, difficile: 1.0 }
+/** Adversaires : nom, livrée (couleur + accent) et modèle en plateau mixte. */
 const PILOTES = [
   { nom: 'Véga', couleur: 0xe8112d, accent: 0xffffff, modele: 'f1' },
   { nom: 'Orion', couleur: 0xff9d0a, accent: 0x15161b, modele: 'hypercar' },
@@ -50,6 +51,22 @@ const PILOTES = [
 export const COULEUR_JOUEUR = 0x18d6ff
 export const ACCENT_JOUEUR = 0xff2a8a
 export const MODELES = ['f1', 'hypercar', 'sportive']
+/** Préréglages d'aides au pilotage. */
+export const AIDES = {
+  completes: { abs: true, antipatinage: true, stabilite: 2, contreBraquage: true },
+  partielles: { abs: true, antipatinage: true, stabilite: 1, contreBraquage: true },
+  aucune: { abs: false, antipatinage: false, stabilite: 0, contreBraquage: false },
+  // Pilotes IA : toutes les aides.
+  ia: { abs: true, antipatinage: true, stabilite: 2, contreBraquage: true }
+}
+
+/**
+ * Emplacement sur la grille de départ (rang 0 = pole position), comme en F1 :
+ * 8 m entre deux voitures, en quinconce, derrière la ligne.
+ */
+export function positionGrille(circuit, rang) {
+  return { s: -(10 + rang * 8), d: (rang % 2 === 0 ? 1 : -1) * Math.min(2.6, circuit.demiLargeur * 0.42) }
+}
 
 export class Course {
   /**
@@ -58,9 +75,13 @@ export class Course {
    * @param {number} options.tours        nombre de tours à boucler
    * @param {string} options.difficulte   'facile' | 'normal' | 'difficile'
    * @param {object} options.enregistreur EnregistreurFantome (conservé d'une course à l'autre)
-   * @param {string} options.modeleJoueur 'f1' | 'hypercar' | 'sportive' (apparence uniquement)
+   * @param {string} options.modeleJoueur 'f1' | 'hypercar' | 'sportive'
+   * @param {string} options.plateau      'monotype' (tous la même voiture) | 'mixte'
+   * @param {string} options.aides        'completes' | 'partielles' | 'aucune'
+   * @param {boolean} options.boiteAuto
    */
-  constructor({ circuit, tours = 3, difficulte = 'normal', enregistreur, modeleJoueur = 'hypercar' }) {
+  constructor({ circuit, tours = 3, difficulte = 'normal', enregistreur, modeleJoueur = 'hypercar',
+    plateau = 'monotype', aides = 'completes', boiteAuto = true }) {
     this.circuit = circuit
     this.tours = tours
     this.difficulte = difficulte
@@ -72,14 +93,16 @@ export class Course {
     this.compteurPas = 0
 
     // --- Véhicules : indice 0 = joueur, 1..5 = IA ---------------------------
-    this.joueur = creerVehicule(0, 'Vous', COULEUR_JOUEUR, true)
+    const modele = MODELES.includes(modeleJoueur) ? modeleJoueur : 'hypercar'
+    this.plateau = plateau
+    this.aidesJoueur = AIDES[aides] ?? AIDES.completes
+    this.boiteAutoJoueur = boiteAuto
+    this.joueur = creerVehicule(0, 'Vous', COULEUR_JOUEUR, true, modele)
     this.joueur.accent = ACCENT_JOUEUR
-    this.joueur.modele = MODELES.includes(modeleJoueur) ? modeleJoueur : 'hypercar'
     this.vehicules = [this.joueur]
     for (let i = 0; i < NB_IA; i++) {
-      const v = creerVehicule(i + 1, PILOTES[i].nom, PILOTES[i].couleur, false)
+      const v = creerVehicule(i + 1, PILOTES[i].nom, PILOTES[i].couleur, false, plateau === 'mixte' ? PILOTES[i].modele : modele)
       v.accent = PILOTES[i].accent
-      v.modele = PILOTES[i].modele
       this.vehicules.push(v)
     }
     /** Classement : indices de véhicules triés du premier au dernier. */
@@ -137,7 +160,7 @@ export class Course {
     // Les niveaux des IA dépendent de la seed du circuit : même seed, même course.
     const rng = creerRng((c.seed ^ 0x51ed270b) >>> 0)
     const facteur = DIFFICULTES[this.difficulte] ?? DIFFICULTES.normal
-    const niveaux = [0.9, 0.925, 0.95, 0.975, 1.0]
+    const niveaux = [0.965, 0.974, 0.983, 0.992, 1.0]
     for (let i = niveaux.length - 1; i > 0; i--) {
       const j = Math.floor(rng() * (i + 1))
       const t = niveaux[i]; niveaux[i] = niveaux[j]; niveaux[j] = t
@@ -151,8 +174,7 @@ export class Course {
       const v = this.vehicules[k]
       // Grille en quinconce derrière la ligne ; le joueur part dernier.
       const rang = v.estJoueur ? NB_IA : k - 1
-      const s = -(9 + rang * 7.5)
-      const d = rang % 2 === 0 ? 2.6 : -2.6
+      const { s, d } = positionGrille(c, rang)
       placerSurCircuit(v, c, s, d)
       v.progression = s
       v.tourMax = -1
@@ -160,14 +182,13 @@ export class Course {
       v.fini = false; v.tempsFin = 0
       v.cmdGaz = 0; v.cmdFrein = 0; v.cmdDir = 0; v.cmdFam = false
       v.choc = 0; v.contactMur = 0
-      v.assistance = !v.estJoueur || this.etat === ETATS.MENU
-      const niveauBase = v.estJoueur ? 0.96 : niveaux[k - 1]
-      v.ia.niveau = niveauBase * facteur * (0.995 + rng() * 0.01)
-      v.ia.vitesseRef = (56 + (niveauBase - 0.9) * 110) * facteur
-      v.ia.decalagePerso = (rng() - 0.5) * 2.2
+      const niveauBase = v.estJoueur ? 0.97 : niveaux[k - 1]
+      v.ia.niveau = niveauBase * facteur * (0.997 + rng() * 0.006)
+      v.ia.decalagePerso = (rng() - 0.5) * Math.min(2.2, c.demiLargeur * 0.3)
       v.ia.lat = d
       v.ia.bloque = 0
-      v.puissance = v.estJoueur ? 1 : 0.9 + (niveauBase - 0.9)
+      v.aides = AIDES.ia
+      v.boiteAuto = true
     }
     if (this.enregistreur) {
       this.enregistreur.debuterTour()
@@ -181,7 +202,8 @@ export class Course {
   // ---------------------------------------------------------------------------
   /**
    * @param {number} dt pas de temps fixe (secondes)
-   * @param {object} entrees { gaz, frein, gauche, droite, fam, autopilote, replacer }
+   * @param {object} entrees { gaz, frein (0..1 ou booléens), direction (-1..1) ou
+   *   gauche/droite, fam, passage (+1 / -1, consommé), autopilote, replacer }
    */
   pas(dt, entrees) {
     const etat = this.etat
@@ -205,20 +227,23 @@ export class Course {
 
     // --- 1. Commandes --------------------------------------------------------
     const joueur = this.joueur
-    // Le pilote automatique conduit avec la direction « directe » des IA.
-    joueur.assistance = etat !== ETATS.COURSE || !!entrees.autopilote
+    // Le joueur ne conduit (avec SES réglages) qu'en course et sans pilote auto.
+    const manuel = etat === ETATS.COURSE && !entrees.autopilote
+    joueur.aides = manuel ? this.aidesJoueur : AIDES.ia
+    joueur.boiteAuto = manuel ? this.boiteAutoJoueur : true
     for (let k = 0; k < vehicules.length; k++) {
       const v = vehicules[k]
       v.choc *= 0.9
-      if (v.estJoueur && etat === ETATS.COURSE && !entrees.autopilote) {
-        v.cmdGaz = entrees.gaz ? 1 : 0
-        v.cmdFrein = entrees.frein ? 1 : 0
-        v.cmdDir = (entrees.gauche ? 1 : 0) - (entrees.droite ? 1 : 0)
+      if (v.estJoueur && manuel) {
+        v.cmdGaz = Math.min(1, Math.max(0, +entrees.gaz || 0))
+        v.cmdFrein = Math.min(1, Math.max(0, +entrees.frein || 0))
+        v.cmdDir = entrees.direction !== undefined ? Math.max(-1, Math.min(1, entrees.direction)) : (entrees.gauche ? 1 : 0) - (entrees.droite ? 1 : 0)
         v.cmdFam = !!entrees.fam
+        if (entrees.passage) { v.demandePassage = entrees.passage; entrees.passage = 0 }
         if (entrees.replacer) this.replacerJoueur()
       } else {
         // IA, mode démo du menu, ou tour d'honneur après l'arrivée.
-        const plafond = v.fini ? 26 : etat === ETATS.MENU ? 48 : Infinity
+        const plafond = v.fini ? 26 : etat === ETATS.MENU ? 55 : Infinity
         piloterIA(v, vehicules, c, dt, plafond)
       }
     }
@@ -288,14 +313,15 @@ export class Course {
 
   /** Le joueur a bouclé tous ses tours. */
   terminer() {
-    if (this.transition(ETATS.FIN)) this.joueur.assistance = true
+    this.transition(ETATS.FIN)
   }
 
   /** Touche R : remet le joueur au centre de la piste, à l'arrêt. */
   replacerJoueur() {
     const j = this.joueur
     const progression = j.progression
-    placerSurCircuit(j, this.circuit, j.s, Math.max(-DEMI_LARGEUR + 2, Math.min(DEMI_LARGEUR - 2, j.d)))
+    const marge = this.circuit.demiLargeur - 2
+    placerSurCircuit(j, this.circuit, j.s, Math.max(-marge, Math.min(marge, j.d)))
     j.progression = progression
   }
 
@@ -329,3 +355,10 @@ export class Course {
   }
 }
 
+
+/** Change le modèle du joueur (et des IA en plateau monotype) sans recréer la course. */
+export function changerModele(course, modele) {
+  if (!MODELES.includes(modele)) return
+  definirModele(course.joueur, modele)
+  if (course.plateau !== 'mixte') for (const v of course.vehicules) definirModele(v, modele)
+}

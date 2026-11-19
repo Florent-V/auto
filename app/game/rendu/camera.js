@@ -30,7 +30,7 @@ export function creerCamera(camera) {
      * @param {number} derive angle de dérive (la caméra suit en partie la trajectoire réelle)
      * @param {number} secousse intensité 0..1 (hors-piste, chocs)
      */
-    poursuivre(dt, x, y, z, lacet, vitesse, derive, secousse) {
+    poursuivre(dt, x, y, z, lacet, vitesse, derive, secousse, facteur = 1) {
       enOrbite = false
       const v = Math.max(0, vitesse)
       const lacetVise = lacet + derive * 0.45
@@ -40,8 +40,8 @@ export function creerCamera(camera) {
       while (ecart < -Math.PI) ecart += 2 * Math.PI
       lacetCam += ecart * amortir(4.5, dt)
       // Recul et hauteur croissants avec la vitesse.
-      const recul = 6.2 + v * 0.05
-      const hauteur = 2.5 + v * 0.012
+      const recul = (6.2 + v * 0.05) * facteur
+      const hauteur = (2.5 + v * 0.012) * (0.55 + 0.45 * facteur)
       _cible.set(x - Math.sin(lacetCam) * recul, y + hauteur, z - Math.cos(lacetCam) * recul)
       _regard.set(x + Math.sin(lacet) * (3 + v * 0.06), y + 1.1, z + Math.cos(lacet) * (3 + v * 0.06))
       if (!initialise) {
@@ -57,7 +57,7 @@ export function creerCamera(camera) {
       camera.lookAt(regardLisse)
       // Champ de vision : effet de vitesse.
       const rapport = Math.min(1, v / 72)
-      const fovVise = 60 + 24 * rapport * rapport
+      const fovVise = 58 + 20 * rapport * rapport
       fov += (fovVise - fov) * amortir(3, dt)
       if (Math.abs(camera.fov - fov) > 0.02) { camera.fov = fov; camera.updateProjectionMatrix() }
     },
@@ -83,6 +83,26 @@ export function creerCamera(camera) {
       fov += (52 - fov) * amortir(3, dt)
       if (Math.abs(camera.fov - fov) > 0.02) { camera.fov = fov; camera.updateProjectionMatrix() }
       lacetCam = Math.atan2(x - camera.position.x, z - camera.position.z)
+    },
+    /**
+     * Caméra embarquée (capot ou cockpit) : position et visée déjà exprimées
+     * dans le monde, solidaires de la caisse. Champ de vision fixe, légère
+     * vibration à haute vitesse et sur les vibreurs.
+     */
+    embarquer(dt, position, vise, vitesse, secousse) {
+      enOrbite = false
+      camera.position.copy(position)
+      const tremble = Math.min(1, vitesse / 90) * 0.012 + secousse * 0.03
+      if (tremble > 0.002) {
+        camera.position.x += (Math.random() - 0.5) * tremble
+        camera.position.y += (Math.random() - 0.5) * tremble
+      }
+      regardLisse.copy(vise)
+      camera.lookAt(regardLisse)
+      initialise = true
+      const fovVise = 70 + Math.min(1, vitesse / 90) * 6
+      fov += (fovVise - fov) * amortir(4, dt)
+      if (Math.abs(camera.fov - fov) > 0.02) { camera.fov = fov; camera.updateProjectionMatrix() }
     },
     /** Place l'angle d'orbite (ex. face au véhicule au début du décompte). */
     definirAngle(a) { angleOrbite = a }

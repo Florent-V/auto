@@ -3,12 +3,14 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "Jeu de course procédural (Nuxt UI + Three.js) — circuit généré par seed, IA, fantôme.",
+  "description": "Simulation de course 3D (Nuxt UI + Three.js) : circuits célèbres, procéduraux et personnels, physique réaliste, IA, fantôme.",
   "scripts": {
     "dev": "nuxt dev",
     "build": "nuxt build",
     "preview": "node .output/server/index.mjs",
-    "test": "node --test tests/*.test.mjs"
+    "test": "node --test tests/*.test.mjs",
+    "banc": "node outils/banc.mjs",
+    "chronos": "node outils/chronos.mjs"
   },
   "dependencies": {
     "@fontsource/orbitron": "^5.3.0",
